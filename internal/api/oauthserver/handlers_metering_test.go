@@ -12,7 +12,7 @@ import (
 func (ts *OAuthClientTestSuite) TestAuthorizationCodeGrantRecordsOAuthServerLoginMetric() {
 	client, _ := ts.createTestOAuthClient()
 	user := ts.createTestUser("oauth-server-metering@example.com")
-	code := ts.mintApprovedCode(client.ID, user.ID)
+	code := ts.mintApprovedCode(client.ID, user, "")
 
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()

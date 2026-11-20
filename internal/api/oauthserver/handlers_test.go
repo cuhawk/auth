@@ -711,6 +711,41 @@ func (ts *OAuthClientTestSuite) TestUserRevokeOAuthGrant() {
 	assert.Nil(ts.T(), deletedSession)
 }
 
+func (ts *OAuthClientTestSuite) revokeGrant(user *models.User, clientID uuid.UUID) error {
+	req := httptest.NewRequest(http.MethodDelete, "/user/oauth/grants?client_id="+clientID.String(), nil)
+	return ts.Server.UserRevokeOAuthGrant(httptest.NewRecorder(), req.WithContext(shared.WithUser(req.Context(), user)))
+}
+
+func (ts *OAuthClientTestSuite) TestUserRevokeOAuthGrantInvalidatesCodes() {
+	user := ts.createTestUser("revoke-code@example.com")
+	otherUser := ts.createTestUser("other-code@example.com")
+	client, _ := ts.createTestOAuthClient()
+	otherClient, _ := ts.createTestOAuthClient()
+	const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+
+	code := ts.mintApprovedCode(client.ID, user, verifier)
+	otherUserCode := ts.mintApprovedCode(client.ID, otherUser, "")
+	otherClientCode := ts.mintApprovedCode(otherClient.ID, user, "")
+	authorization, err := models.FindOAuthServerAuthorizationByCode(ts.DB, code)
+	require.NoError(ts.T(), err)
+	require.NoError(ts.T(), authorization.VerifyPKCE(verifier))
+
+	require.NoError(ts.T(), ts.revokeGrant(user, client.ID))
+	_, err = models.FindOAuthServerAuthorizationByCode(ts.DB, code)
+	require.True(ts.T(), models.IsNotFoundError(err), "revocation should delete the unexchanged code")
+	ts.requireInvalidGrant(ts.exchangeCode(client, code, verifier))
+	require.NoError(ts.T(), ts.exchangeCode(client, otherUserCode, ""))
+	require.NoError(ts.T(), ts.exchangeCode(otherClient, otherClientCode, ""))
+
+	// Exercise the consent check with an old authorization still present.
+	require.NoError(ts.T(), ts.DB.Create(authorization))
+	ts.requireInvalidGrant(ts.exchangeCode(client, code, verifier))
+
+	newCode := ts.mintApprovedCode(client.ID, user, verifier)
+	ts.requireInvalidGrant(ts.exchangeCode(client, code, verifier))
+	require.NoError(ts.T(), ts.exchangeCode(client, newCode, verifier))
+}
+
 func (ts *OAuthClientTestSuite) TestUserRevokeOAuthGrantNotFound() {
 	// Create test user
 	user := ts.createTestUser("test4@example.com")

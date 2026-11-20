@@ -230,6 +230,12 @@ func (auth *OAuthServerAuthorization) VerifyPKCE(codeVerifier string) error {
 	return security.VerifyPKCEChallenge(*auth.CodeChallenge, codeChallengeMethod, codeVerifier)
 }
 
+// DeleteOAuthServerAuthorizationsByUserAndClient removes unexchanged authorizations for a grant.
+func DeleteOAuthServerAuthorizationsByUserAndClient(tx *storage.Connection, userID, clientID uuid.UUID) error {
+	query := fmt.Sprintf("DELETE FROM %q WHERE user_id = ? AND client_id = ?", (OAuthServerAuthorization{}).TableName())
+	return tx.RawQuery(query, userID, clientID).Exec()
+}
+
 // Query functions for OAuth authorizations
 
 // FindOAuthServerAuthorizationByID finds an OAuth authorization by authorization_id

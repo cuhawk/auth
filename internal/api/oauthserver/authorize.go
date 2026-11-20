@@ -363,16 +363,16 @@ func (s *Server) OAuthServerConsent(w http.ResponseWriter, r *http.Request) erro
 		}
 
 		if body.Action == OAuthServerConsentActionApprove {
-			// Approve authorization
-			if err := authorization.Approve(tx); err != nil {
-				return apierrors.NewInternalServerError("error approving authorization").WithInternalError(err)
-			}
-
-			// Store consent for future use
+			// Store consent first so the code is approved under this grant.
 			scopes := authorization.GetScopeList()
 			consent := models.NewOAuthServerConsent(user.ID, authorization.ClientID, scopes)
 			if err := models.UpsertOAuthServerConsent(tx, consent); err != nil {
 				return apierrors.NewInternalServerError("error storing consent").WithInternalError(err)
+			}
+
+			// Approve authorization
+			if err := authorization.Approve(tx); err != nil {
+				return apierrors.NewInternalServerError("error approving authorization").WithInternalError(err)
 			}
 
 			// Build success redirect URL

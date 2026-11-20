@@ -396,11 +396,20 @@ func (s *Server) handleAuthorizationCodeGrant(ctx context.Context, w http.Respon
 	grantParams.Scopes = &scopes
 
 	err = db.Transaction(func(tx *storage.Connection) error {
-		if _, terr := models.FindOAuthServerAuthorizationByIDForUpdate(tx, authorization.AuthorizationID); terr != nil {
+		lockedAuthorization, terr := models.FindOAuthServerAuthorizationByIDForUpdate(tx, authorization.AuthorizationID)
+		if terr != nil {
 			if models.IsNotFoundError(terr) {
 				return apierrors.NewOAuthError("invalid_grant", "Invalid authorization code")
 			}
 			return apierrors.NewInternalServerError("Error locking authorization code").WithInternalError(terr)
+		}
+
+		consent, terr := models.FindActiveOAuthServerConsentForShare(tx, user.ID, client.ID)
+		if terr != nil {
+			return apierrors.NewInternalServerError("Error finding active consent").WithInternalError(terr)
+		}
+		if consent == nil || (lockedAuthorization.ApprovedAt != nil && consent.GrantedAt.After(*lockedAuthorization.ApprovedAt)) {
+			return apierrors.NewOAuthError("invalid_grant", "Authorization code has no matching active consent")
 		}
 
 		authMethod := models.OAuthProviderAuthorizationCode
@@ -414,7 +423,6 @@ func (s *Server) handleAuthorizationCodeGrant(ctx context.Context, w http.Respon
 		}
 
 		// Issue the refresh token and access token
-		var terr error
 		tokenResponse, terr = tokenService.IssueRefreshToken(r, w.Header(), tx, user, authMethod, grantParams)
 		if terr != nil {
 			return terr
@@ -618,6 +626,11 @@ func (s *Server) UserRevokeOAuthGrant(w http.ResponseWriter, r *http.Request) er
 
 	// Revoke the consent in a transaction
 	err = db.Transaction(func(tx *storage.Connection) error {
+		// Lock authorizations before consent, matching the order used by code exchange.
+		if terr := models.DeleteOAuthServerAuthorizationsByUserAndClient(tx, user.ID, clientID); terr != nil {
+			return terr
+		}
+
 		if terr := consent.Revoke(tx); terr != nil {
 			return terr
 		}

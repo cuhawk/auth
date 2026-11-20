@@ -124,6 +124,19 @@ func FindActiveOAuthServerConsentByUserAndClient(tx *storage.Connection, userID 
 	return consent, nil
 }
 
+// FindActiveOAuthServerConsentForShare locks the active consent until the transaction ends.
+func FindActiveOAuthServerConsentForShare(tx *storage.Connection, userID, clientID uuid.UUID) (*OAuthServerConsent, error) {
+	consent := &OAuthServerConsent{}
+	query := fmt.Sprintf("SELECT * FROM %q WHERE user_id = ? AND client_id = ? AND revoked_at IS NULL FOR SHARE", consent.TableName())
+	if err := tx.RawQuery(query, userID, clientID).First(consent); err != nil {
+		if errors.Cause(err) == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, errors.Wrap(err, "error locking active OAuth consent")
+	}
+	return consent, nil
+}
+
 // FindOAuthServerConsentsByUser finds all OAuth consents for a user
 func FindOAuthServerConsentsByUser(tx *storage.Connection, userID uuid.UUID, includeRevoked bool) ([]*OAuthServerConsent, error) {
 	var consents []*OAuthServerConsent
